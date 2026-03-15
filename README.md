@@ -32,22 +32,26 @@ If your machine is roughly in this ballpark — or better — this will work for
 2. **Scans a Rust project** folder and queues every `.rs` file
 3. **Sends each file to the LLM** with a structured prompt asking for targeted refactor suggestions in JSON
 4. **Streams the response live** to a terminal panel with real-time token counts, tok/s rate, and timing stats
-5. **Animates the edits** into the code editor — deleting old text, typing in the new — like someone's actually in there
-6. **Writes the changes to disk** and runs `cargo check` asynchronously to catch any LLM-introduced mistakes
-7. **Re-queues broken files** for up to 3 rounds of auto-fix if the compiler complains
-8. **Ejects the loaded model** from LM Studio automatically on app exit so it doesn't sit in RAM when you're done
-9. **Drops ASCII art** in the terminal after each successful edit, because productivity tools need more personality
+5. **Pipelines requests** — as soon as a response arrives, the next file is sent to the LLM immediately, so prompting and animation run in parallel
+6. **Animates the edits** into the code editor — deleting old text, typing in the new — like someone's actually in there
+7. **Diffuses between files** with a noise-character transition effect when moving to the next file
+8. **Writes the changes to disk** and runs `cargo check` asynchronously to catch any LLM-introduced mistakes
+9. **Re-queues broken files** for up to 3 rounds of auto-fix if the compiler complains
+10. **Retries failed files** up to 2 times before skipping, without stalling the rest of the queue
+11. **Ejects the loaded model** from LM Studio automatically on app exit so it doesn't sit in RAM when you're done
+12. **Drops ASCII art** in the terminal after each successful edit, because productivity tools need more personality
 
 ---
 
 ## recommended models
 
-Anything that fits in ~8–12 GB of RAM and can follow JSON schema instructions. Tested with:
+Anything that can follow JSON schema instructions. Tested with:
 
-- `Qwen2.5-Coder 4B` — fast, good at Rust, fits comfortably in 16 GB alongside the OS
+- `Qwen2.5-Coder 4B` — fast, good at Rust, fits comfortably in 16 GB alongside the OS (~15–25 tok/s)
 - `Qwen3 4B` — solid reasoning, slightly slower
+- `9B models` — work fine, just slower on integrated graphics
 
-Larger models will work if you have the VRAM/RAM budget. Smaller models get flaky with the JSON schema.
+Smaller models get flaky with the JSON schema. Larger models will work if you have the RAM budget.
 
 ---
 
@@ -71,18 +75,21 @@ Everything worth tweaking lives in the `// --- CONFIGURATION ---` block at the t
 const LM_STUDIO_BASE: &str = "http://127.0.0.1:1234"; // change if LM Studio is on another port
 const DEFAULT_MODEL: &str   = "qwen3.5-4b";            // pre-selected model on startup
 const DEFAULT_CONTEXT: u32  = 30_000;                  // default context window (tokens)
-const MAX_FIX_ROUNDS: u32   = 3;                       // how many cargo check + fix cycles before giving up
+const MAX_FIX_ROUNDS: u32   = 3;                       // cargo check + fix cycles before giving up
+const MAX_FILE_RETRIES: u8  = 2;                       // per-file LLM retry attempts before skipping
 
 // animation speed
 const DELETE_INTERVAL_MS: u64 = 30; // ms per character deleted
 const TYPE_INTERVAL_MS:   u64 = 30; // ms per character typed
+const TRANSITION_MS:      u64 = 500; // file-switch diffusion effect duration (ms)
 
 // network timeouts
 const TIMEOUT_MODEL_LIST_SECS:   u64 = 10;  // fetching the model list
 const TIMEOUT_MODEL_UNLOAD_SECS: u64 = 60;  // ejecting a model
 const TIMEOUT_MODEL_LOAD_SECS:   u64 = 300; // loading a model (large ones take time)
 const TIMEOUT_LLM_CONNECT_SECS:  u64 = 30;  // initial connection to LM Studio
-const TIMEOUT_LLM_IDLE_SECS:     u64 = 120; // max silence between stream chunks before giving up
+const TIMEOUT_LLM_IDLE_SECS:     u64 = 300; // max silence between stream chunks before giving up
+const TIMEOUT_ANALYZING_SECS:    u64 = 720; // watchdog: force-fail if a file gets stuck this long
 ```
 
 The streaming timeout (`TIMEOUT_LLM_IDLE_SECS`) is an *idle* timeout — it resets on every received chunk, so long responses on slow hardware will never time out as long as tokens keep arriving. Only fires if the model completely stalls.
