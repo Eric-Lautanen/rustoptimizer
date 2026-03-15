@@ -400,7 +400,7 @@ impl RefactorApp {
             available_models: Vec::new(),
             selected_model_idx: 0,
             context_length: DEFAULT_CONTEXT,
-            analysis_prompt: "Analyze the following Rust file and identify specific improvements.".into(),
+            analysis_prompt: "Analyze the following file and identify specific improvements.".into(),
             llm_cancel: Arc::new(AtomicBool::new(false)),
             transition_start: None,
             transition_from_content: String::new(),
@@ -771,7 +771,7 @@ SOURCE ({path}):
             )));
             let error_text = errors.join("\n");
             let prompt = format!(
-                r#"Answer ONLY in JSON matching this exact schema. Fix the compiler errors in this Rust file:
+                r#"Answer ONLY in JSON matching this exact schema. Fix the errors in this file:
 
 {{
   "fixes": [
@@ -1115,7 +1115,7 @@ SOURCE ({path}):
             ui.label(egui::RichText::new("⚡").color(C_ACCENT).size(15.0));
             ui.add_space(3.0);
             ui.label(
-                egui::RichText::new("RUST OPTIMIZER")
+                egui::RichText::new("OPTIMIZER")
                     .color(C_TEXT)
                     .size(13.0)
                     .strong()
@@ -1493,76 +1493,128 @@ SOURCE ({path}):
                 });
                 ui.add_space(6.0);
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                // Snapshot row data so the lock isn't held during rendering.
+                struct QueueRow {
+                    name: String,
+                    badge: &'static str,
+                    badge_color: egui::Color32,
+                    name_color: egui::Color32,
+                    row_fill: egui::Color32,
+                    removable: bool,
+                    hover: Option<String>,
+                }
+                let rows: Vec<QueueRow> = {
                     let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    for (i, file) in state.files.iter().enumerate() {
+                    state.files.iter().enumerate().map(|(i, file)| {
                         let (badge, badge_color) = match &file.status {
-                            FileStatus::Pending => (".", C_TEXT_MUTED),
-                            FileStatus::Analyzing => ("~", C_PURPLE),
-                            FileStatus::ReadyToAnimate => ("-", C_ORANGE),
-                            FileStatus::Animating { .. } => (">", C_ACCENT),
-                            FileStatus::Completed => ("+", C_GREEN),
-                            FileStatus::Error(_) => ("x", C_RED),
-                            FileStatus::PendingErrorFix(_) => ("!", C_ORANGE),
+                            FileStatus::Pending           => (".", C_TEXT_MUTED),
+                            FileStatus::Analyzing         => ("~", C_PURPLE),
+                            FileStatus::ReadyToAnimate    => ("-", C_ORANGE),
+                            FileStatus::Animating { .. }  => (">", C_ACCENT),
+                            FileStatus::Completed         => ("+", C_GREEN),
+                            FileStatus::Error(_)          => ("x", C_RED),
+                            FileStatus::PendingErrorFix(_)=> ("!", C_ORANGE),
                         };
                         let is_current = i == state.current_file_index
-                            && matches!(
-                                state.app_state,
-                                AppState::Processing | AppState::FixingErrors(_)
-                            );
-
-                        let name =
-                            file.path.file_name().unwrap_or_default().to_string_lossy();
-                        let name_color = if is_current { C_TEXT } else { C_TEXT_DIM };
-                        let row_fill = if is_current {
-                            egui::Color32::from_rgba_unmultiplied(97, 218, 251, 12)
-                        } else {
-                            egui::Color32::TRANSPARENT
+                            && matches!(state.app_state,
+                                AppState::Processing | AppState::FixingErrors(_));
+                        let removable = matches!(file.status,
+                            FileStatus::Pending | FileStatus::Completed | FileStatus::Error(_));
+                        let hover = match &file.status {
+                            FileStatus::Error(msg) => Some(format!("Error: {}", msg)),
+                            FileStatus::PendingErrorFix(errs) => Some(format!(
+                                "{} error(s) to fix",
+                                errs.iter().filter(|e| e.trim_start().starts_with("error")).count()
+                            )),
+                            _ => None,
                         };
+                        QueueRow {
+                            name: file.path.file_name().unwrap_or_default()
+                                .to_string_lossy().into_owned(),
+                            badge,
+                            badge_color,
+                            name_color: if is_current { C_TEXT } else { C_TEXT_DIM },
+                            row_fill: if is_current {
+                                egui::Color32::from_rgba_unmultiplied(97, 218, 251, 12)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            },
+                            removable,
+                            hover,
+                        }
+                    }).collect()
+                };
 
-                        let row = egui::Frame::NONE
-                            .fill(row_fill)
-                            .corner_radius(3)
-                            .inner_margin(egui::Margin {
-                                left: 4,
-                                right: 4,
-                                top: 2,
-                                bottom: 2,
-                            })
-                            .show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(badge)
-                                            .color(badge_color)
-                                            .size(11.0)
-                                            .strong()
-                                            .family(egui::FontFamily::Monospace),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(name.as_ref())
-                                            .color(name_color)
-                                            .size(12.0)
-                                            .family(egui::FontFamily::Monospace),
-                                    );
-                                });
-                            });
-                        match &file.status {
-                            FileStatus::Error(msg) => {
-                                row.response.on_hover_text(format!("Error: {}", msg));
+                let mut remove_idx: Option<usize> = None;
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::Grid::new("queue_grid")
+                        .num_columns(3)
+                        .spacing([4.0, 2.0])
+                        .show(ui, |ui| {
+                            for (i, row) in rows.iter().enumerate() {
+                                // Badge
+                                ui.label(
+                                    egui::RichText::new(row.badge)
+                                        .color(row.badge_color)
+                                        .size(11.0)
+                                        .strong()
+                                        .family(egui::FontFamily::Monospace),
+                                );
+                                // Filename — highlighted if current row
+                                let label = egui::Frame::NONE
+                                    .fill(row.row_fill)
+                                    .corner_radius(3)
+                                    .show(ui, |ui| {
+                                        let resp = ui.label(
+                                            egui::RichText::new(&row.name)
+                                                .color(row.name_color)
+                                                .size(12.0)
+                                                .family(egui::FontFamily::Monospace),
+                                        );
+                                        if let Some(tip) = &row.hover {
+                                            resp.on_hover_text(tip);
+                                        }
+                                    });
+                                if let Some(tip) = &row.hover {
+                                    label.response.on_hover_text(tip);
+                                }
+                                // Delete button — only for safe-to-remove states
+                                if row.removable {
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("-")
+                                                .color(C_TEXT_MUTED)
+                                                .size(11.0)
+                                                .family(egui::FontFamily::Monospace),
+                                        )
+                                        .frame(false)
+                                        .min_size(egui::vec2(16.0, 0.0)),
+                                    )
+                                    .on_hover_text("Remove from queue")
+                                    .clicked()
+                                    {
+                                        remove_idx = Some(i);
+                                    }
+                                } else {
+                                    ui.label(""); // keep grid aligned
+                                }
+                                ui.end_row();
                             }
-                            FileStatus::PendingErrorFix(errs) => {
-                                row.response.on_hover_text(format!(
-                                    "{} compiler error(s) to fix",
-                                    errs.iter()
-                                        .filter(|e| e.trim_start().starts_with("error"))
-                                        .count()
-                                ));
-                            }
-                            _ => {}
+                        });
+                });
+
+                // Apply deletion outside the scroll area after the lock is free.
+                if let Some(idx) = remove_idx {
+                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    if idx < state.files.len() {
+                        state.files.remove(idx);
+                        // Keep current_file_index valid.
+                        if idx < state.current_file_index && state.current_file_index > 0 {
+                            state.current_file_index -= 1;
                         }
                     }
-                });
+                }
             });
     }
 
@@ -1928,14 +1980,10 @@ SOURCE ({path}):
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()
             {
+                // Accept any file that reads as valid UTF-8 text.
                 let rs: Vec<_> = entries
                     .iter()
-                    .filter(|e| {
-                        e.path().is_file()
-                            && e.path()
-                                .extension()
-                                .map_or(false, |x| x == "rs")
-                    })
+                    .filter(|e| e.path().is_file())
                     .collect();
                 let count = rs.len();
                 for entry in rs {
@@ -2238,9 +2286,17 @@ SOURCE ({path}):
         let idx = state.current_file_index;
 
         if idx >= state.files.len() {
-            state.app_state = AppState::CargoChecking;
-            drop(state);
-            self.spawn_cargo_check();
+            // Only run cargo check when Rust files were part of the scan.
+            let has_rust = state.files.iter().any(|f| {
+                f.path.extension().map_or(false, |x| x.eq_ignore_ascii_case("rs"))
+            });
+            if has_rust {
+                state.app_state = AppState::CargoChecking;
+                drop(state);
+                self.spawn_cargo_check();
+            } else {
+                state.app_state = AppState::Finished;
+            }
             return;
         }
 
@@ -2557,7 +2613,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Rust Optimizer",
+        "Optimizer",
         native_options,
         Box::new(|cc| Ok(Box::new(RefactorApp::new(cc)))),
     )
