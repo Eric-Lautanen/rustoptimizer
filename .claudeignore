@@ -1,0 +1,6 @@
+target/
+assets/
+proto/
+*.log
+Cargo.lock
+build.rs

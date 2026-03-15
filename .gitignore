@@ -1,0 +1,11 @@
+/target
+/.claude
+Cargo.lock
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+.env
+.DS_Store
+Thumbs.db
