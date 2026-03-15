@@ -11,10 +11,10 @@ use tokio::sync::mpsc;
 
 // --- CONFIGURATION ---
 const LM_STUDIO_BASE: &str = "http://127.0.0.1:1234";
-const DEFAULT_MODEL: &str = "qwen3.5-4b";
+const DEFAULT_MODEL: &str = "";
 const DEFAULT_CONTEXT: u32 = 30_000;
-const DELETE_INTERVAL_MS: u64 = 30;
-const TYPE_INTERVAL_MS: u64 = 30;
+const DELETE_INTERVAL_MS: u64 = 10;
+const TYPE_INTERVAL_MS: u64 = 10;
 const TRANSITION_MS: u64 = 500; // file-switch diffusion effect duration
 const LINE_HEIGHT_PX: f32 = 14.0; // matches monospace size 11.5 + line gap
 const SCROLL_LERP: f32 = 0.18;
