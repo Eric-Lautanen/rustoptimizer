@@ -367,6 +367,8 @@ struct RefactorApp {
     analysis_prompt: String,
     // Cancels any in-flight LLM stream when set to true (pause / close folder).
     llm_cancel: Arc<AtomicBool>,
+    // Backup directory for undo — created on folder open, deleted on folder close.
+    backup_dir: Option<PathBuf>,
     // File-switch diffusion effect
     transition_start: Option<Instant>,
     transition_from_content: String,
@@ -402,6 +404,7 @@ impl RefactorApp {
             context_length: DEFAULT_CONTEXT,
             analysis_prompt: "Analyze the following file and identify specific improvements.".into(),
             llm_cancel: Arc::new(AtomicBool::new(false)),
+            backup_dir: None,
             transition_start: None,
             transition_from_content: String::new(),
             last_shown_file_idx: None,
@@ -1180,6 +1183,7 @@ SOURCE ({path}):
                         )
                         .frame(false),
                     )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text("Refresh model list from LM Studio")
                     .clicked()
                 {
@@ -1315,7 +1319,9 @@ SOURCE ({path}):
                     } else {
                         ui.available_width()
                     };
-                    if ui.add_sized([load_width, 26.0], load_btn).clicked() {
+                    if ui.add_sized([load_width, 26.0], load_btn)
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked() {
                         let ctx = self.context_length;
                         // Always eject before loading: either the same model (reload)
                         // or a different model that happens to be loaded.
@@ -1339,6 +1345,7 @@ SOURCE ({path}):
                         .stroke(egui::Stroke::new(1.0, C_BORDER));
                         if ui
                             .add_sized([30.0, 26.0], eject_btn)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text("Eject model from memory")
                             .clicked()
                         {
@@ -1352,13 +1359,16 @@ SOURCE ({path}):
 
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
         egui::Frame::NONE
-            .inner_margin(12.0)
+            .inner_margin(egui::Margin { left: 10, right: 8, top: 10, bottom: 10 })
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                    ui.set_width(ui.available_width());
                 self.render_model_panel(ui);
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.add(egui::Separator::default().spacing(0.0));
-                ui.add_space(10.0);
+                ui.add_space(6.0);
 
                 // Prompt section
                 ui.label(
@@ -1368,13 +1378,14 @@ SOURCE ({path}):
                         .strong()
                         .family(egui::FontFamily::Monospace),
                 );
-                ui.add_space(6.0);
+                ui.add_space(4.0);
                 egui::Frame::NONE
                     .fill(C_RAISED)
                     .corner_radius(4)
                     .stroke(egui::Stroke::new(1.0, C_BORDER))
                     .inner_margin(6.0)
                     .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
                         ui.add(
                             egui::TextEdit::multiline(&mut self.analysis_prompt)
                                 .font(egui::TextStyle::Monospace)
@@ -1385,9 +1396,9 @@ SOURCE ({path}):
                         );
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.add(egui::Separator::default().spacing(0.0));
-                ui.add_space(10.0);
+                ui.add_space(6.0);
 
                 // Source folder controls
                 ui.label(
@@ -1397,7 +1408,7 @@ SOURCE ({path}):
                         .strong()
                         .family(egui::FontFamily::Monospace),
                 );
-                ui.add_space(6.0);
+                ui.add_space(4.0);
 
                 let folder_is_open = self.state.lock().unwrap_or_else(|e| e.into_inner()).root_path.is_some();
 
@@ -1410,7 +1421,9 @@ SOURCE ({path}):
                         )
                         .fill(C_RAISED)
                         .corner_radius(4);
-                        if ui.add_sized([ui.available_width() * 0.55, 26.0], btn).clicked() {
+                        if ui.add_sized([ui.available_width() * 0.55, 26.0], btn)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked() {
                             self.close_folder();
                         }
                     } else {
@@ -1421,7 +1434,9 @@ SOURCE ({path}):
                         )
                         .fill(C_RAISED)
                         .corner_radius(4);
-                        if ui.add_sized([ui.available_width() * 0.55, 26.0], btn).clicked() {
+                        if ui.add_sized([ui.available_width() * 0.55, 26.0], btn)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked() {
                             if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                 self.scan_folder(&path);
                             }
@@ -1455,7 +1470,9 @@ SOURCE ({path}):
                         )
                         .fill(bg)
                         .corner_radius(4);
-                        if ui.add_sized([ui.available_width(), 26.0], btn).clicked() {
+                        if ui.add_sized([ui.available_width(), 26.0], btn)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked() {
                             let next = if is_processing {
                                 // Cancel any active LLM stream immediately.
                                 self.llm_cancel.store(true, Ordering::Relaxed);
@@ -1470,9 +1487,9 @@ SOURCE ({path}):
                     }
                 });
 
-                ui.add_space(12.0);
-                ui.add(egui::Separator::default().spacing(0.0));
                 ui.add_space(8.0);
+                ui.add(egui::Separator::default().spacing(0.0));
+                ui.add_space(6.0);
 
                 // Queue section header with file count
                 let file_count = self.state.lock().unwrap_or_else(|e| e.into_inner()).files.len();
@@ -1498,7 +1515,7 @@ SOURCE ({path}):
                         );
                     }
                 });
-                ui.add_space(6.0);
+                ui.add_space(4.0);
 
                 // Snapshot row data so the lock isn't held during rendering.
                 struct QueueRow {
@@ -1508,6 +1525,7 @@ SOURCE ({path}):
                     name_color: egui::Color32,
                     row_fill: egui::Color32,
                     removable: bool,
+                    undoable: bool,
                     hover: Option<String>,
                 }
                 let rows: Vec<QueueRow> = {
@@ -1527,6 +1545,7 @@ SOURCE ({path}):
                                 AppState::Processing | AppState::FixingErrors(_));
                         let removable = matches!(file.status,
                             FileStatus::Pending | FileStatus::Completed | FileStatus::Error(_));
+                        let undoable = matches!(file.status, FileStatus::Completed);
                         let hover = match &file.status {
                             FileStatus::Error(msg) => Some(format!("Error: {}", msg)),
                             FileStatus::PendingErrorFix(errs) => Some(format!(
@@ -1547,17 +1566,19 @@ SOURCE ({path}):
                                 egui::Color32::TRANSPARENT
                             },
                             removable,
+                            undoable,
                             hover,
                         }
                     }).collect()
                 };
 
                 let mut remove_idx: Option<usize> = None;
+                let mut undo_idx: Option<usize> = None;
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     egui::Grid::new("queue_grid")
-                        .num_columns(3)
-                        .spacing([4.0, 2.0])
+                        .num_columns(4)
+                        .spacing([3.0, 1.0])
                         .show(ui, |ui| {
                             for (i, row) in rows.iter().enumerate() {
                                 // Badge
@@ -1576,7 +1597,7 @@ SOURCE ({path}):
                                         let resp = ui.label(
                                             egui::RichText::new(&row.name)
                                                 .color(row.name_color)
-                                                .size(12.0)
+                                                .size(11.0)
                                                 .family(egui::FontFamily::Monospace),
                                         );
                                         if let Some(tip) = &row.hover {
@@ -1586,43 +1607,94 @@ SOURCE ({path}):
                                 if let Some(tip) = &row.hover {
                                     label.response.on_hover_text(tip);
                                 }
-                                // Delete button — only for safe-to-remove states
+                                // Undo button — completed files only
+                                if row.undoable {
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("↩")
+                                                .color(C_ACCENT)
+                                                .size(11.0),
+                                        )
+                                        .frame(false)
+                                        .min_size(egui::vec2(14.0, 0.0)),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text("Restore original file")
+                                    .clicked()
+                                    {
+                                        undo_idx = Some(i);
+                                    }
+                                } else {
+                                    ui.label("");
+                                }
+                                // Remove button — safe-to-remove states
                                 if row.removable {
                                     if ui.add(
                                         egui::Button::new(
-                                            egui::RichText::new("-")
+                                            egui::RichText::new("×")
                                                 .color(C_TEXT_MUTED)
                                                 .size(11.0)
                                                 .family(egui::FontFamily::Monospace),
                                         )
                                         .frame(false)
-                                        .min_size(egui::vec2(16.0, 0.0)),
+                                        .min_size(egui::vec2(14.0, 0.0)),
                                     )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
                                     .on_hover_text("Remove from queue")
                                     .clicked()
                                     {
                                         remove_idx = Some(i);
                                     }
                                 } else {
-                                    ui.label(""); // keep grid aligned
+                                    ui.label("");
                                 }
                                 ui.end_row();
                             }
                         });
                 });
 
-                // Apply deletion outside the scroll area after the lock is free.
+                // Apply removal.
                 if let Some(idx) = remove_idx {
                     let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     if idx < state.files.len() {
                         state.files.remove(idx);
-                        // Keep current_file_index valid.
                         if idx < state.current_file_index && state.current_file_index > 0 {
                             state.current_file_index -= 1;
                         }
                     }
                 }
-            });
+
+                // Apply undo — restore from backup file, or fall back to original_content.
+                if let Some(idx) = undo_idx {
+                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    if idx < state.files.len() {
+                        // Compute backup path before borrowing files mutably.
+                        let backup_path = self.backup_dir.as_ref()
+                            .zip(state.root_path.as_ref())
+                            .and_then(|(bdir, root)| {
+                                state.files[idx].path.strip_prefix(root).ok()
+                                    .map(|rel| bdir.join(rel))
+                            });
+                        let file_name = state.files[idx].path
+                            .file_name().unwrap_or_default()
+                            .to_string_lossy().into_owned();
+
+                        let file = &mut state.files[idx];
+                        let restored = backup_path
+                            .and_then(|bk| std::fs::read_to_string(&bk).ok())
+                            .unwrap_or_else(|| file.original_content.clone());
+
+                        std::fs::write(&file.path, &restored).ok();
+                        file.working_content = restored.clone();
+                        file.original_content = restored;
+                        file.fixes.clear();
+                        file.retry_count = 0;
+                        file.status = FileStatus::Pending;
+                        state.push_log(format!("↩ {} restored to original", file_name));
+                    }
+                }
+            }); // with_layout
+        }); // Frame
     }
 
     fn render_editor(&mut self, ui: &mut egui::Ui) {
@@ -1823,6 +1895,7 @@ SOURCE ({path}):
                                     )
                                     .frame(false),
                                 )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text("Copy terminal output to clipboard")
                                 .clicked()
                             {
@@ -1970,16 +2043,31 @@ SOURCE ({path}):
         self.editor_scroll_y = 0.0;
         self.scroll_target_y = 0.0;
         self.transition_start = None;
-
         self.transition_from_content = String::new();
         self.last_shown_file_idx = None;
+        // Wipe the backup directory for this session.
+        if let Some(dir) = self.backup_dir.take() {
+            std::fs::remove_dir_all(dir).ok();
+        }
     }
 
-    fn scan_folder(&self, path: &Path) {
+    fn scan_folder(&mut self, path: &Path) {
+        // Create a timestamped backup directory in the system temp folder.
+        let backup_dir = std::env::temp_dir().join(format!(
+            "optimizer_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        ));
+        std::fs::create_dir_all(&backup_dir).ok();
+        self.backup_dir = Some(backup_dir.clone());
+
         let tx = self.tx.clone();
         let path = path.to_path_buf();
         let _ = tx.send(Message::SetState(AppState::Scanning));
         let _ = tx.send(Message::Log(format!("📁 Scanning {}...", path.display())));
+        let _ = tx.send(Message::Log(format!("💾 Backups: {}", backup_dir.display())));
         // Use a plain OS thread — walkdir + fs::read_to_string are blocking and
         // running them inside tokio::spawn would starve the async executor.
         std::thread::spawn(move || {
@@ -1988,20 +2076,30 @@ SOURCE ({path}):
                 .collect::<Result<Vec<_>, _>>()
             {
                 // Accept any file that reads as valid UTF-8 text.
-                let rs: Vec<_> = entries
+                let files: Vec<_> = entries
                     .iter()
                     .filter(|e| e.path().is_file())
                     .collect();
-                let count = rs.len();
-                for entry in rs {
+                let count = files.len();
+                for entry in files {
                     if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                        let _ =
-                            tx.send(Message::AddFile(entry.path().to_path_buf(), content));
+                        // Write original to backup dir before queuing.
+                        if let Ok(rel) = entry.path().strip_prefix(&path) {
+                            let bk = backup_dir.join(rel);
+                            if let Some(parent) = bk.parent() {
+                                std::fs::create_dir_all(parent).ok();
+                            }
+                            std::fs::write(&bk, &content).ok();
+                        }
+                        let _ = tx.send(Message::AddFile(
+                            entry.path().to_path_buf(),
+                            content,
+                        ));
                     }
                 }
                 let _ = tx.send(Message::SetState(AppState::Paused));
                 let _ = tx.send(Message::Log(format!(
-                    "  {} .rs file(s) found. Press > Start.",
+                    "  {} file(s) found. Press > Start.",
                     count
                 )));
             }
@@ -2054,12 +2152,13 @@ SOURCE ({path}):
                         }
                     }
                     let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    // Only reset to Idle if no folder is open — if the user opened
-                    // a folder while the model was loading, keep the Paused state
-                    // so the Start button stays visible.
-                    if state.root_path.is_none() {
-                        state.app_state = AppState::Idle;
-                    }
+                    // Clear the loading spinner — go to Paused if a folder is open
+                    // (so Start is visible), otherwise Idle.
+                    state.app_state = if state.root_path.is_some() {
+                        AppState::Paused
+                    } else {
+                        AppState::Idle
+                    };
                     state.push_log(format!("✅ Model '{}' ready", key));
                     drop(state);
                     // Re-fetch model list to get fresh instance_id for the loaded model
@@ -2552,7 +2651,8 @@ impl eframe::App for RefactorApp {
 
         // Side + central panels fill the remaining space between header and terminal.
         egui::SidePanel::left("sidebar")
-            .default_width(270.0)
+            .exact_width(240.0)
+            .resizable(false)
             .frame(
                 egui::Frame::NONE
                     .fill(C_SURFACE)
@@ -2576,6 +2676,11 @@ impl eframe::App for RefactorApp {
             .iter()
             .find(|m| m.is_loaded)
             .map(|m| (m.key.clone(), m.instance_id.clone()));
+
+        // Clean up backup directory.
+        if let Some(dir) = self.backup_dir.take() {
+            std::fs::remove_dir_all(dir).ok();
+        }
 
         if let Some((key, instance_id)) = loaded {
             let body = if let Some(id) = instance_id {
