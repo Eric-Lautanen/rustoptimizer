@@ -67,7 +67,7 @@ LM Studio runs the AI model locally on your machine. Current version as of March
 
 | Model | Size | Notes |
 |---|---|---|
-| Qwen3.5 9B Q4_K_M | ~6 GB | Strong all-around pick for 16 GB — what this app was tested with |
+| Qwen3.5 9B Q4_K_M | ~6 GB | Strong all-around pick for 16 GB |
 | Qwen3.5 4B Q4_K_M | ~3 GB | Fast and light — also tested with this app. Good if running other things simultaneously |
 | Qwen3 8B Q4_K_M | ~5–6 GB | Best all-around for coding + reasoning. Thinking mode for debugging, fast mode for edits |
 | Qwen3 4B 2507 Q4_K_M | ~3 GB | Solid lightweight option, punches above its weight |
