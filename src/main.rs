@@ -1074,24 +1074,31 @@ SOURCE ({path}):
                             .map(|l| l.to_string())
                             .collect();
 
+                        // Use the exit code as source of truth — parsing alone can
+                        // miss errors that don't follow the error[Exxxx] pattern.
+                        let failed = !out.status.success();
                         let err_count = errors
                             .iter()
-                            .filter(|l| l.trim_start().starts_with("error["))
+                            .filter(|l| l.trim_start().starts_with("error"))
                             .count();
                         let warn_count = errors
                             .iter()
                             .filter(|l| l.trim_start().starts_with("warning"))
                             .count();
 
-                        if err_count == 0 && warn_count == 0 {
-                            let _ = tx.send(Message::Log("  ✅ cargo check passed!".into()));
-                        } else {
+                        if failed {
                             let _ = tx.send(Message::Log(format!(
                                 "  ⚠️  {} error(s), {} warning(s)",
                                 err_count, warn_count
                             )));
+                        } else {
+                            let _ = tx.send(Message::Log("  ✅ cargo check passed!".into()));
                         }
-                        let _ = tx.send(Message::CargoCheckResult(errors));
+                        // Only send errors vec when the build actually failed so
+                        // CargoCheckResult doesn't trigger a spurious fix round.
+                        let _ = tx.send(Message::CargoCheckResult(
+                            if failed { errors } else { vec![] }
+                        ));
                         ctx.request_repaint();
                     }
                     Err(e) => {

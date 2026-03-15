@@ -4,6 +4,11 @@
 
 ---
 
+> [!WARNING]
+> **This tool writes directly to your files with no undo.** A bad model or a bad prompt will gleefully corrupt your entire codebase. **Back up your work or run it inside a git repo before you start.** You have been warned.
+
+---
+
 ## what is this
 
 A GUI tool that hooks up [LM Studio](https://lmstudio.ai/) to your files and has a local AI model analyze, suggest, and *animate* edits directly into your code — character by character, hacker-movie style.
