@@ -1519,11 +1519,11 @@ SOURCE ({path}):
 
                 // Snapshot row data so the lock isn't held during rendering.
                 struct QueueRow {
-                    name: String,
+                    name: String,         // full filename (shown on hover)
+                    display_name: String, // truncated to fit the column
                     badge: &'static str,
                     badge_color: egui::Color32,
                     name_color: egui::Color32,
-                    row_fill: egui::Color32,
                     removable: bool,
                     undoable: bool,
                     hover: Option<String>,
@@ -1554,17 +1554,22 @@ SOURCE ({path}):
                             )),
                             _ => None,
                         };
+                        let name = file.path.file_name().unwrap_or_default()
+                            .to_string_lossy().into_owned();
+                        // Truncate long names to keep the grid column tight
+                        let display_name = if name.chars().count() > 23 {
+                            let mut s: String = name.chars().take(16).collect();
+                            s.push('…');
+                            s
+                        } else {
+                            name.clone()
+                        };
                         QueueRow {
-                            name: file.path.file_name().unwrap_or_default()
-                                .to_string_lossy().into_owned(),
+                            name,
+                            display_name,
                             badge,
                             badge_color,
                             name_color: if is_current { C_TEXT } else { C_TEXT_DIM },
-                            row_fill: if is_current {
-                                egui::Color32::from_rgba_unmultiplied(97, 218, 251, 12)
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            },
                             removable,
                             undoable,
                             hover,
@@ -1575,83 +1580,81 @@ SOURCE ({path}):
                 let mut remove_idx: Option<usize> = None;
                 let mut undo_idx: Option<usize> = None;
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new("queue_grid")
-                        .num_columns(4)
-                        .spacing([3.0, 1.0])
-                        .show(ui, |ui| {
-                            for (i, row) in rows.iter().enumerate() {
-                                // Badge
-                                ui.label(
-                                    egui::RichText::new(row.badge)
-                                        .color(row.badge_color)
-                                        .size(11.0)
-                                        .strong()
-                                        .family(egui::FontFamily::Monospace),
-                                );
-                                // Filename — highlighted if current row
-                                let label = egui::Frame::NONE
-                                    .fill(row.row_fill)
-                                    .corner_radius(3)
-                                    .show(ui, |ui| {
-                                        let resp = ui.label(
-                                            egui::RichText::new(&row.name)
-                                                .color(row.name_color)
-                                                .size(11.0)
-                                                .family(egui::FontFamily::Monospace),
+                const BADGE_W: f32 = 10.0;
+                const BTN_W:   f32 = 14.0;
+                const ROW_H:   f32 = 14.0;
+                const COL_GAP: f32 = 4.0;
+                let col_layout = egui::Layout::left_to_right(egui::Align::Center);
+                let btn_layout = egui::Layout::centered_and_justified(egui::Direction::LeftToRight);
+                // Non-floating scrollbar allocates its own lane — never overlaps content.
+                ui.style_mut().spacing.scroll.floating = false;
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                            // Compute name width here — inside the scroll area where
+                            // available_width() already excludes the scrollbar.
+                            let name_w = (ui.available_width()
+                                - BADGE_W
+                                - BTN_W * 2.0
+                                - COL_GAP * 3.0)
+                                .max(40.0);
+                            egui::Grid::new("queue_grid")
+                                .num_columns(4)
+                                .spacing([COL_GAP, 1.0])
+                                .min_col_width(0.0)
+                                .show(ui, |ui| {
+                                    for (i, row) in rows.iter().enumerate() {
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(BADGE_W, ROW_H), col_layout,
+                                            |ui| { ui.label(egui::RichText::new(row.badge)
+                                                .color(row.badge_color).size(11.0).strong()
+                                                .family(egui::FontFamily::Monospace)); },
                                         );
-                                        if let Some(tip) = &row.hover {
-                                            resp.on_hover_text(tip);
-                                        }
-                                    });
-                                if let Some(tip) = &row.hover {
-                                    label.response.on_hover_text(tip);
-                                }
-                                // Undo button — completed files only
-                                if row.undoable {
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("↩")
-                                                .color(C_ACCENT)
-                                                .size(11.0),
-                                        )
-                                        .frame(false)
-                                        .min_size(egui::vec2(14.0, 0.0)),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text("Restore original file")
-                                    .clicked()
-                                    {
-                                        undo_idx = Some(i);
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(name_w, ROW_H), col_layout,
+                                            |ui| {
+                                                let hover_text = match &row.hover {
+                                                    Some(tip) => format!("{}\n{}", row.name, tip),
+                                                    None => row.name.clone(),
+                                                };
+                                                ui.add(egui::Label::new(
+                                                    egui::RichText::new(&row.display_name)
+                                                        .color(row.name_color).size(12.0)
+                                                        .family(egui::FontFamily::Monospace),
+                                                ).truncate()).on_hover_text(hover_text);
+                                            },
+                                        );
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(BTN_W, ROW_H), btn_layout,
+                                            |ui| {
+                                                if row.undoable {
+                                                    if ui.add(egui::Button::new(
+                                                        egui::RichText::new("↩").color(C_ACCENT).size(11.0),
+                                                    ).frame(false).min_size(egui::vec2(0.0, 0.0)))
+                                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                    .on_hover_text("Restore original file")
+                                                    .clicked() { undo_idx = Some(i); }
+                                                }
+                                            },
+                                        );
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(BTN_W, ROW_H), btn_layout,
+                                            |ui| {
+                                                if row.removable {
+                                                    if ui.add(egui::Button::new(
+                                                        egui::RichText::new("×").color(C_TEXT_MUTED).size(11.0),
+                                                    ).frame(false).min_size(egui::vec2(0.0, 0.0)))
+                                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                    .on_hover_text("Remove from queue")
+                                                    .clicked() { remove_idx = Some(i); }
+                                                }
+                                            },
+                                        );
+                                        ui.end_row();
                                     }
-                                } else {
-                                    ui.label("");
-                                }
-                                // Remove button — safe-to-remove states
-                                if row.removable {
-                                    if ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("×")
-                                                .color(C_TEXT_MUTED)
-                                                .size(11.0)
-                                                .family(egui::FontFamily::Monospace),
-                                        )
-                                        .frame(false)
-                                        .min_size(egui::vec2(14.0, 0.0)),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text("Remove from queue")
-                                    .clicked()
-                                    {
-                                        remove_idx = Some(i);
-                                    }
-                                } else {
-                                    ui.label("");
-                                }
-                                ui.end_row();
-                            }
+                                });
                         });
-                });
 
                 // Apply removal.
                 if let Some(idx) = remove_idx {
