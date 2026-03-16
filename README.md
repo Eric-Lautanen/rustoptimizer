@@ -109,13 +109,7 @@ lms daemon down  # stop it
 lms log          # stream live logs
 ```
 
-### load the model in LM Studio
-Before hitting Start in this app, make sure your model is loaded in LM Studio:
-- Press `Ctrl+L` (Windows/Linux) or `Cmd+L` (macOS)
-- Select your downloaded model and click Load
-- Wait for it to finish — this can take a minute for larger models
-
-Or skip this step and use the **Load** button inside this app — it will call the LM Studio API to load the model for you.
+You don't need to load a model manually in LM Studio — the app does it for you via the **⚡ Load** button.
 
 ---
 
@@ -128,7 +122,7 @@ cargo run --release
 ```
 
 1. The app opens and connects to LM Studio automatically
-2. Pick your loaded model from the dropdown (or load one with the **⚡ Load** button)
+2. Pick a model from the dropdown and hit **⚡ Load** — the app loads it for you
 3. Click **Open Folder** and select the folder you want to process
 4. Optionally edit the **PROMPT** to tell the model what to do
 5. Hit **▶ Start**
@@ -200,11 +194,11 @@ The streaming timeout (`TIMEOUT_LLM_IDLE_SECS`) is an *idle* timeout — it rese
 
 ## the fun part
 
-The whole point was to see how far you could push local LLM-assisted tooling on commodity hardware. Turns out: pretty far. The Ryzen 7 handles 4B parameter models at a usable speed (~15–25 tok/s), the egui UI stays responsive during inference, and the streaming terminal actually makes waiting for the LLM feel kinda cool instead of just... waiting.
+The whole point was to see how far you could push local LLM-assisted tooling on commodity hardware. Turns out: pretty far. The Ryzen 7 handles 4B parameter models at a usable speed (~8-12 tok/s), the egui UI stays responsive during inference, and the streaming terminal actually makes waiting for the LLM feel kinda cool instead of just... waiting.
 
-Point it at a Rust project and it'll refactor your code. Point it at markdown and it'll clean up your docs. Point it at a text file full of recipes and it'll have opinions about your cooking. The model doesn't care — it'll try to improve whatever you throw at it.
+Point it at any project and it'll refactor your code. Point it at markdown and it'll clean up your docs. Point it at a text file full of recipes and it'll have opinions about your cooking. The model doesn't care — it'll try to improve whatever you throw at it.
 
-Is it as good as Claude doing the same thing? No. Is it free, private, and runs on a laptop you already own? Also yes.
+Is it as good as Claude doing the same thing? No. Is it free, private, and runs on a laptop you already own? Yes.
 
 ---
 
